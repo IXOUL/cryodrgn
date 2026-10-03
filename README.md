@@ -39,11 +39,11 @@ Our package is compatible with Python versions 3.10 through 3.14;
 we recommend using the latest available Python version:
 
     # Create and activate conda environment
-    (base) $ conda create --name cryodrgn python=3.14
+    (base) $ conda create -p /scratch/network/lw8858/conda-envs/cryodrgn python=3.14
     (cryodrgn) $ conda activate cryodrgn
 
     # install cryodrgn
-    (cryodrgn) $ pip install cryodrgn
+    (cryodrgn) $ python -m pip install cryodrgn
 
 You can alternatively install a newer, less stable, development version of `cryodrgn` using our beta release channel:
 
