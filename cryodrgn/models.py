@@ -13,6 +13,7 @@ import cryodrgn.config
 from cryodrgn.lattice import Lattice
 from cryodrgn.decoders.base import Decoder
 from cryodrgn.decoders.gaussian import GaussianDecoder
+from cryodrgn.decoders.triplane import TriplaneDecoder
 
 Norm = Sequence[Any]  # mean, std
 
@@ -47,6 +48,8 @@ class HetOnlyVAE(nn.Module):
         decoder_type: str = "mlp",
         n_gaussians: int = 512,
         gaussian_sigma: float = 1.5,
+        triplane_res: Optional[int] = None,
+        triplane_dim: int = 64,
     ):
         super(HetOnlyVAE, self).__init__()
         self.lattice = lattice
@@ -106,6 +109,8 @@ class HetOnlyVAE(nn.Module):
             decoder_type=decoder_type,
             n_gaussians=n_gaussians,
             gaussian_sigma=gaussian_sigma,
+            triplane_res=triplane_res,
+            triplane_dim=triplane_dim,
         )
 
     @classmethod
@@ -152,6 +157,8 @@ class HetOnlyVAE(nn.Module):
             decoder_type=c.get("decoder_type", "mlp"),
             n_gaussians=c.get("n_gaussians", 512),
             gaussian_sigma=c.get("gaussian_sigma", 1.5),
+            triplane_res=c.get("triplane_res", None),
+            triplane_dim=c.get("triplane_dim", 64),
         )
         # model = HetOnlyVAE(
         #     lat,
@@ -272,6 +279,17 @@ def load_decoder(config, weights=None, device=None) -> Tuple[Decoder, Lattice]:
     c = cfg["model_args"]
     D = cfg["lattice_args"]["D"]
     activation = {"relu": nn.ReLU, "leaky_relu": nn.LeakyReLU}[c["activation"]]
+    # model = get_decoder(
+    #     3 + c["zdim"],
+    #     D,
+    #     c["layers"],
+    #     c["dim"],
+    #     c["domain"],
+    #     c["pe_type"],
+    #     c["pe_dim"],
+    #     activation,
+    #     c["feat_sigma"],
+    # )
     model = get_decoder(
         3 + c["zdim"],
         D,
@@ -282,6 +300,11 @@ def load_decoder(config, weights=None, device=None) -> Tuple[Decoder, Lattice]:
         c["pe_dim"],
         activation,
         c["feat_sigma"],
+        decoder_type=c.get("decoder_type", "mlp"),
+        n_gaussians=c.get("n_gaussians", 512),
+        gaussian_sigma=c.get("gaussian_sigma", 1.5),
+        triplane_res=c.get("triplane_res", None),
+        triplane_dim=c.get("triplane_dim", 64),
     )
     lattice = Lattice(
         cfg["lattice_args"]["D"], extent=cfg["lattice_args"]["extent"], device=device
@@ -802,12 +825,15 @@ def get_decoder(
     decoder_type: str = "mlp",
     n_gaussians: int = 512,
     gaussian_sigma: float = 1.5,
+    triplane_res: Optional[int] = None,
+    triplane_dim: int = 64,
 ) -> Decoder:
 
-    # -----------------------------
-    # New Gaussian decoder
-    # -----------------------------
     if decoder_type == "gaussian":
+        if domain != "fourier":
+            raise ValueError(
+                "GaussianDecoder currently supports only domain='fourier'"
+            )
         return GaussianDecoder(
             zdim=in_dim - 3,
             D=D,
@@ -817,37 +843,33 @@ def get_decoder(
             sigma=gaussian_sigma,
             activation=activation,
         )
+    if decoder_type == "triplane":
+        if domain != "fourier":
+            raise ValueError(
+                "TriplaneDecoder currently supports only domain='fourier'"
+            )
 
-    # -----------------------------
-    # Original cryoDRGN decoders
-    # -----------------------------
+        return TriplaneDecoder(
+            zdim=in_dim - 3,
+            D=D,
+            plane_res=triplane_res,
+            plane_dim=triplane_dim,
+            hidden_dim=dim,
+            nlayers=layers,
+            activation=activation,
+        )
+
+
     if decoder_type != "mlp":
         raise ValueError(f"Unknown decoder type: {decoder_type}")
 
     if enc_type == "none":
         if domain == "hartley":
-            model = ResidLinearMLP(
-                in_dim,
-                layers,
-                dim,
-                1,
-                activation,
-            )
+            model = ResidLinearMLP(in_dim, layers, dim, 1, activation)
         else:
-            model = FTSliceDecoder(
-                in_dim,
-                D,
-                layers,
-                dim,
-                activation,
-            )
+            model = FTSliceDecoder(in_dim, D, layers, dim, activation)
     else:
-        model_t = (
-            PositionalDecoder
-            if domain == "hartley"
-            else FTPositionalDecoder
-        )
-
+        model_t = PositionalDecoder if domain == "hartley" else FTPositionalDecoder
         model = model_t(
             in_dim,
             D,

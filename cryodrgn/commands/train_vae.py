@@ -364,7 +364,7 @@ def add_args(parser: argparse.ArgumentParser) -> None:
 
     group.add_argument(
         "--decoder-type",
-        choices=("mlp", "gaussian"),
+        choices=("mlp", "gaussian", "triplane"),
         default="mlp",
         help="Decoder representation type (default: %(default)s)",
     )
@@ -381,6 +381,20 @@ def add_args(parser: argparse.ArgumentParser) -> None:
         type=float,
         default=1.5,
         help="Fixed Gaussian sigma in real-space pixels (default: %(default)s)",
+    )
+
+    group.add_argument(
+        "--triplane-res",
+        type=int,
+        default=None,
+        help="Resolution of each triplane; default D//2",
+    )
+
+    group.add_argument(
+        "--triplane-dim",
+        type=int,
+        default=64,
+        help="Feature dimension of each triplane (default: %(default)s)",
     )
 
 
@@ -632,6 +646,8 @@ def save_config(args, dataset, lattice, model, out_config):
         decoder_type=args.decoder_type,
         n_gaussians=args.n_gaussians,
         gaussian_sigma=args.gaussian_sigma,
+        triplane_res=args.triplane_res,
+        triplane_dim=args.triplane_dim,
 
         tilt_params=dict(
             tdim=args.tdim,
