@@ -11,6 +11,8 @@ from torch.nn.parallel import DataParallel
 from cryodrgn import fft, lie_tools, utils
 import cryodrgn.config
 from cryodrgn.lattice import Lattice
+from cryodrgn.decoders.base import Decoder
+from cryodrgn.decoders.gaussian import GaussianDecoder
 
 Norm = Sequence[Any]  # mean, std
 
@@ -42,6 +44,9 @@ class HetOnlyVAE(nn.Module):
         activation=nn.ReLU,
         feat_sigma: Optional[float] = None,
         tilt_params={},
+        decoder_type: str = "mlp",
+        n_gaussians: int = 512,
+        gaussian_sigma: float = 1.5,
     ):
         super(HetOnlyVAE, self).__init__()
         self.lattice = lattice
@@ -77,6 +82,17 @@ class HetOnlyVAE(nn.Module):
         else:
             raise RuntimeError("Encoder mode {} not recognized".format(encode_mode))
         self.encode_mode = encode_mode
+        # self.decoder = get_decoder(
+        #     3 + zdim,
+        #     lattice.D,
+        #     players,
+        #     pdim,
+        #     domain,
+        #     enc_type,
+        #     enc_dim,
+        #     activation,
+        #     feat_sigma,
+        # )
         self.decoder = get_decoder(
             3 + zdim,
             lattice.D,
@@ -87,6 +103,9 @@ class HetOnlyVAE(nn.Module):
             enc_dim,
             activation,
             feat_sigma,
+            decoder_type=decoder_type,
+            n_gaussians=n_gaussians,
+            gaussian_sigma=gaussian_sigma,
         )
 
     @classmethod
@@ -130,7 +149,27 @@ class HetOnlyVAE(nn.Module):
             activation=activation,
             feat_sigma=c["feat_sigma"],
             tilt_params=c.get("tilt_params", {}),
+            decoder_type=c.get("decoder_type", "mlp"),
+            n_gaussians=c.get("n_gaussians", 512),
+            gaussian_sigma=c.get("gaussian_sigma", 1.5),
         )
+        # model = HetOnlyVAE(
+        #     lat,
+        #     c["qlayers"],
+        #     c["qdim"],
+        #     c["players"],
+        #     c["pdim"],
+        #     in_dim,
+        #     c["zdim"],
+        #     encode_mode=c["encode_mode"],
+        #     enc_mask=enc_mask,
+        #     enc_type=c["pe_type"],
+        #     enc_dim=c["pe_dim"],
+        #     domain=c["domain"],
+        #     activation=activation,
+        #     feat_sigma=c["feat_sigma"],
+        #     tilt_params=c.get("tilt_params", {}),
+        # )
         if weights is not None:
             ckpt = torch.load(weights, map_location=device, weights_only=False)
             model.load_state_dict(ckpt["model_state_dict"])
@@ -177,28 +216,28 @@ class HetOnlyVAE(nn.Module):
         return self.decode(*args, **kwargs)
 
 
-class Decoder(nn.Module):
-    def eval_volume(
-        self,
-        coords: Tensor,
-        D: int,
-        extent: float,
-        norm: Norm,
-        zval: Optional[np.ndarray] = None,
-    ) -> Tensor:
-        """
-        Evaluate the model on a DxDxD volume
-        Inputs:
-            coords: lattice coords on the x-y plane (D^2 x 3)
-            D: size of lattice
-            extent: extent of lattice [-extent, extent]
-            norm: data normalization
-            zval: value of latent (zdim x 1)
-        """
-        raise NotImplementedError
+# class Decoder(nn.Module):
+#     def eval_volume(
+    #     self,
+    #     coords: Tensor,
+    #     D: int,
+    #     extent: float,
+    #     norm: Norm,
+    #     zval: Optional[np.ndarray] = None,
+    # ) -> Tensor:
+    #     """
+    #     Evaluate the model on a DxDxD volume
+    #     Inputs:
+    #         coords: lattice coords on the x-y plane (D^2 x 3)
+    #         D: size of lattice
+    #         extent: extent of lattice [-extent, extent]
+    #         norm: data normalization
+    #         zval: value of latent (zdim x 1)
+    #     """
+    #     raise NotImplementedError
 
-    def get_voxel_decoder(self) -> Optional["Decoder"]:
-        return None
+    # def get_voxel_decoder(self) -> Optional["Decoder"]:
+    #     return None
 
 
 class DataParallelDecoder(Decoder):
@@ -750,7 +789,6 @@ class FTSliceDecoder(Decoder):
         )  # remove last +k freq for inverse FFT
         return vol
 
-
 def get_decoder(
     in_dim: int,
     D: int,
@@ -761,14 +799,55 @@ def get_decoder(
     enc_dim: Optional[int] = None,
     activation: Type = nn.ReLU,
     feat_sigma: Optional[float] = None,
+    decoder_type: str = "mlp",
+    n_gaussians: int = 512,
+    gaussian_sigma: float = 1.5,
 ) -> Decoder:
+
+    # -----------------------------
+    # New Gaussian decoder
+    # -----------------------------
+    if decoder_type == "gaussian":
+        return GaussianDecoder(
+            zdim=in_dim - 3,
+            D=D,
+            n_gaussians=n_gaussians,
+            hidden_dim=dim,
+            nlayers=layers,
+            sigma=gaussian_sigma,
+            activation=activation,
+        )
+
+    # -----------------------------
+    # Original cryoDRGN decoders
+    # -----------------------------
+    if decoder_type != "mlp":
+        raise ValueError(f"Unknown decoder type: {decoder_type}")
+
     if enc_type == "none":
         if domain == "hartley":
-            model = ResidLinearMLP(in_dim, layers, dim, 1, activation)
+            model = ResidLinearMLP(
+                in_dim,
+                layers,
+                dim,
+                1,
+                activation,
+            )
         else:
-            model = FTSliceDecoder(in_dim, D, layers, dim, activation)
+            model = FTSliceDecoder(
+                in_dim,
+                D,
+                layers,
+                dim,
+                activation,
+            )
     else:
-        model_t = PositionalDecoder if domain == "hartley" else FTPositionalDecoder
+        model_t = (
+            PositionalDecoder
+            if domain == "hartley"
+            else FTPositionalDecoder
+        )
+
         model = model_t(
             in_dim,
             D,
@@ -779,8 +858,8 @@ def get_decoder(
             enc_dim=enc_dim,
             feat_sigma=feat_sigma,
         )
-    return model
 
+    return model
 
 class VAE(nn.Module):
     def __init__(

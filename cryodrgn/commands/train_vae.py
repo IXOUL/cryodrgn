@@ -362,6 +362,27 @@ def add_args(parser: argparse.ArgumentParser) -> None:
         help="Activation (default: %(default)s)",
     )
 
+    group.add_argument(
+        "--decoder-type",
+        choices=("mlp", "gaussian"),
+        default="mlp",
+        help="Decoder representation type (default: %(default)s)",
+    )
+
+    group.add_argument(
+        "--n-gaussians",
+        type=int,
+        default=512,
+        help="Number of Gaussian primitives for Gaussian decoder (default: %(default)s)",
+    )
+
+    group.add_argument(
+        "--gaussian-sigma",
+        type=float,
+        default=1.5,
+        help="Fixed Gaussian sigma in real-space pixels (default: %(default)s)",
+    )
+
 
 def train_batch(
     model: nn.Module,
@@ -607,6 +628,11 @@ def save_config(args, dataset, lattice, model, out_config):
         pe_dim=args.pe_dim,
         domain=args.domain,
         activation=args.activation,
+
+        decoder_type=args.decoder_type,
+        n_gaussians=args.n_gaussians,
+        gaussian_sigma=args.gaussian_sigma,
+
         tilt_params=dict(
             tdim=args.tdim,
             tlayers=args.tlayers,
@@ -614,6 +640,27 @@ def save_config(args, dataset, lattice, model, out_config):
             ntilts=args.ntilts,
         ),
     )
+    
+    # model_args = dict(
+    #     qlayers=args.qlayers,
+    #     qdim=args.qdim,
+    #     players=args.players,
+    #     pdim=args.pdim,
+    #     zdim=args.zdim,
+    #     encode_mode=args.encode_mode,
+    #     enc_mask=args.enc_mask,
+    #     pe_type=args.pe_type,
+    #     feat_sigma=args.feat_sigma,
+    #     pe_dim=args.pe_dim,
+    #     domain=args.domain,
+    #     activation=args.activation,
+    #     tilt_params=dict(
+    #         tdim=args.tdim,
+    #         tlayers=args.tlayers,
+    #         t_emb_dim=args.t_emb_dim,
+    #         ntilts=args.ntilts,
+    #     ),
+    # )
     config = dict(
         dataset_args=dataset_args, lattice_args=lattice_args, model_args=model_args
     )
@@ -773,6 +820,23 @@ def main(args: argparse.Namespace) -> None:
         tilt_params["ntilts"] = args.ntilts
         tilt_params["tlayers"] = args.tlayers
         tilt_params["tdim"] = args.tdim
+    # model = HetOnlyVAE(
+    #     lattice,
+    #     args.qlayers,
+    #     args.qdim,
+    #     args.players,
+    #     args.pdim,
+    #     in_dim,
+    #     args.zdim,
+    #     encode_mode=args.encode_mode,
+    #     enc_mask=enc_mask,
+    #     enc_type=args.pe_type,
+    #     enc_dim=args.pe_dim,
+    #     domain=args.domain,
+    #     activation=activation,
+    #     feat_sigma=args.feat_sigma,
+    #     tilt_params=tilt_params,
+    # )
     model = HetOnlyVAE(
         lattice,
         args.qlayers,
@@ -789,6 +853,9 @@ def main(args: argparse.Namespace) -> None:
         activation=activation,
         feat_sigma=args.feat_sigma,
         tilt_params=tilt_params,
+        decoder_type=args.decoder_type,
+        n_gaussians=args.n_gaussians,
+        gaussian_sigma=args.gaussian_sigma,
     )
     model.to(device)
     logger.info(model)
